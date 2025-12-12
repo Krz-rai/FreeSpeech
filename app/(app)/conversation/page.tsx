@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useRef } from "react";
-import { useConversation } from "@elevenlabs/react";
+import { useEffect, useState, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -9,6 +8,7 @@ import { TranscriptPanel } from "@/components/conversation/transcript-panel";
 import { SmartReplies } from "@/components/conversation/smart-replies";
 import { CustomInput } from "@/components/conversation/custom-input";
 import { ResearchPanel } from "@/components/conversation/research-panel";
+import { Mic, MicOff } from "lucide-react";
 
 interface SmartReply {
   id: string;
@@ -28,8 +28,12 @@ export default function ConversationPage() {
   const [smartReplies, setSmartReplies] = useState<SmartReply[]>([]);
   const [researchQuery, setResearchQuery] = useState<string | null>(null);
   const [isResearchOpen, setIsResearchOpen] = useState(false);
-  const [isMuted, setIsMuted] = useState(true); // Agent is MUTED by default
-  const pendingReplyRef = useRef<string | null>(null); // Track what we're expecting agent to say
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isGeneratingReplies, setIsGeneratingReplies] = useState(false);
+  
+  const recognitionRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   
   // Convex queries
   const dbUser = useQuery(api.users.getUser, { authId: user?.id ?? "" });
@@ -40,250 +44,249 @@ export default function ConversationPage() {
   // Ensure user exists in Convex
   useEffect(() => {
     if (user && dbUser === null) {
-        createUser({
-            authId: user.id,
-            email: user.emailAddresses[0]?.emailAddress,
-            name: user.fullName || user.firstName || "User",
-        });
+      createUser({
+        authId: user.id,
+        email: user.emailAddresses[0]?.emailAddress,
+        name: user.fullName || user.firstName || "User",
+      });
     }
   }, [user, dbUser, createUser]);
-  
-  // ElevenLabs Conversation Hook
-  const conversation = useConversation({
-    onConnect: () => {
-      console.log("✅ Connected to ElevenLabs agent");
-      // Mute agent immediately on connect
-      conversation.setVolume({ volume: 0 });
-      console.log("🔇 Agent muted on connect");
-    },
-    onDisconnect: () => {
-      console.log("❌ Disconnected from ElevenLabs agent");
-    },
-    onMessage: (message: any) => {
-      console.log("📩 Message received:", message);
-      
-      if (message.type === "user_transcript") {
-        // User1 spoke - add to transcript
-        setTranscript(prev => [...prev, {
-          role: "other",
-          text: message.text,
-          timestamp: Date.now()
-        }]);
-      } else if (message.type === "agent_response") {
-        // Agent responded - only add if we have a pending reply
-        if (pendingReplyRef.current) {
-          setTranscript(prev => [...prev, {
-            role: "agent", 
-            text: pendingReplyRef.current!,
-            timestamp: Date.now()
-          }]);
-          pendingReplyRef.current = null;
+
+  // Initialize Web Speech API
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      console.error("Speech recognition not supported");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+
+    recognition.onresult = async (event: any) => {
+      const last = event.results.length - 1;
+      const text = event.results[last][0].transcript;
+
+      console.log("👂 Heard:", text);
+
+      // Add to transcript as "other" (User1 speaking)
+      const newEntry: TranscriptEntry = {
+        role: "other",
+        text: text,
+        timestamp: Date.now(),
+      };
+
+      setTranscript((prev) => {
+        const updated = [...prev, newEntry];
+        // Generate smart replies based on new transcript
+        generateSmartReplies(updated);
+        return updated;
+      });
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      if (event.error === "no-speech") {
+        // Automatically restart if no speech detected
+        if (isListening) {
+          try {
+            recognition.start();
+          } catch (e) {
+            // Already started
+          }
         }
       }
-    },
-    onError: (error: any) => {
-      console.error("🚨 Conversation error:", error);
-    },
-    
-    clientTools: {
-      generateSmartReplies: async (params: any) => {
-        console.log("🎯 generateSmartReplies CALLED!", params);
-        
-        // IMMEDIATELY interrupt any pending speech and mute
+    };
+
+    recognition.onend = () => {
+      // Automatically restart if still in listening mode
+      if (isListening) {
         try {
-          conversation.interrupt();
-          conversation.setVolume({ volume: 0 });
-          console.log("🔇 Interrupted and muted after generating replies");
+          recognition.start();
         } catch (e) {
-          console.warn("Could not interrupt/mute:", e);
+          // Already started
         }
-        
-        const { options } = params;
-        let parsedOptions: SmartReply[] = [];
+      }
+    };
 
+    recognitionRef.current = recognition;
+
+    return () => {
+      if (recognitionRef.current) {
         try {
-          parsedOptions = typeof options === "string" ? JSON.parse(options) : options;
-        } catch (err) {
-          console.error("Failed to parse smart reply options:", err);
-          return { success: false };
+          recognitionRef.current.stop();
+        } catch (e) {
+          // Already stopped
         }
+      }
+    };
+  }, [isListening]);
 
-        if (!Array.isArray(parsedOptions)) {
-          console.warn("Smart replies not an array:", parsedOptions);
-          return { success: false };
-        }
+  // Generate smart replies using API
+  const generateSmartReplies = async (currentTranscript: TranscriptEntry[]) => {
+    if (currentTranscript.length === 0) return;
 
-        const trimmed = parsedOptions.slice(0, 3);
-        console.log("✅ Setting smart replies:", trimmed);
-        setSmartReplies(trimmed);
+    setIsGeneratingReplies(true);
+    try {
+      const response = await fetch("/api/generate-replies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transcript: currentTranscript,
+          userName: dbUser?.name || "User",
+          communicationStyle: dbUser?.communicationStyle || "warm and conversational",
+        }),
+      });
 
-        return { success: true };
-      },
-      
-      requestResearch: async (params: any) => {
-        console.log("🔍 requestResearch CALLED!", params);
-        const { query } = params;
-        setResearchQuery(query);
-        setIsResearchOpen(true);
-        
-        return new Promise((resolve) => {
-          window.__researchResolve = resolve;
-        });
-      },
-    },
-  });
+      const data = await response.json();
+      if (data.replies && data.replies.length > 0) {
+        console.log("✨ Generated replies:", data.replies);
+        setSmartReplies(data.replies);
+      }
+    } catch (error) {
+      console.error("Failed to generate replies:", error);
+    } finally {
+      setIsGeneratingReplies(false);
+    }
+  };
 
-  // Watch for isSpeaking changes - mute when finished speaking
-  useEffect(() => {
-    if (!conversation.isSpeaking && pendingReplyRef.current === null) {
-      // Agent stopped speaking and no pending reply - ensure muted
+  // Start/Stop listening
+  const toggleListening = () => {
+    if (!recognitionRef.current) {
+      alert("Speech recognition not supported in this browser");
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
       try {
-        conversation.setVolume({ volume: 0 });
+        recognitionRef.current.start();
+        setIsListening(true);
       } catch (e) {
-        // Ignore if not connected
+        console.error("Failed to start recognition:", e);
       }
     }
-  }, [conversation.isSpeaking]);
+  };
 
-  // Start conversation
-  const startConversation = async () => {
+  // Speak using ElevenLabs TTS
+  const speakText = async (text: string) => {
     if (!dbUser?.elevenLabsVoiceId) {
       alert("Please complete voice setup first");
       return;
     }
 
+    setIsSpeaking(true);
     try {
-        let signedUrl = "";
-        
-        try {
-            const response = await fetch("/api/elevenlabs/signed-url");
-            if (response.ok) {
-                const data = await response.json();
-                signedUrl = data.signedUrl;
-            }
-        } catch (err) {
-            console.warn("Error fetching signed URL", err);
-        }
+      // Call our API route for TTS
+      const response = await fetch("/api/speak", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: text,
+          voiceId: dbUser.elevenLabsVoiceId,
+        }),
+      });
 
-        const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID!;
-        
-        if (!agentId) {
-            alert("Missing Agent ID configuration");
-            return;
-        }
-        
-        await conversation.startSession({
-            agentId: agentId,
-            // @ts-ignore
-            signedUrl: signedUrl || undefined,
-            overrides: {
-                tts: {
-                  voice_id: dbUser.elevenLabsVoiceId,
-                },
-            },
-            dynamicVariables: {
-                user_name: dbUser.name || "Friend",
-                communication_style: dbUser.communicationStyle || "warm and conversational",
-                user_memories: dbUser.memories?.join(". ") || "No specific memories yet",
-            },
-        });
-        
-        // Mute immediately after starting
-        setTimeout(() => {
-          conversation.setVolume({ volume: 0 });
-          setIsMuted(true);
-          console.log("🔇 Muted after session start");
-        }, 100);
-        
-    } catch (e) {
-        console.error("Failed to start conversation", e);
-        alert("Failed to start conversation. Check console for details.");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "TTS request failed");
+      }
+
+      // Play the audio
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      audio.onerror = (e) => {
+        console.error("Audio playback error:", e);
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      audio.onended = () => {
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      await audio.play();
+
+      // Add to transcript as "agent" (me speaking)
+      setTranscript((prev) => [
+        ...prev,
+        {
+          role: "agent",
+          text: text,
+          timestamp: Date.now(),
+        },
+      ]);
+    } catch (error: any) {
+      console.error("Failed to speak:", error);
+      alert(`Speech failed: ${error.message}`);
+      setIsSpeaking(false);
     }
   };
 
-  // Handle smart reply selection - THIS is when agent should speak
+  // Handle smart reply selection
   const handleSelectReply = async (reply: SmartReply) => {
-    // Record selection
+    // Record selection for learning
     if (dbUser?._id) {
-        await recordReplySelection({
-            userId: dbUser._id,
-            selectedText: reply.text,
-            category: reply.category,
-            allOptions: smartReplies,
-        });
+      await recordReplySelection({
+        userId: dbUser._id,
+        selectedText: reply.text,
+        category: reply.category,
+        allOptions: smartReplies,
+      });
     }
-    
-    // Store what we expect the agent to say
-    pendingReplyRef.current = reply.text;
-    
-    // UNMUTE so we can hear the agent
-    conversation.setVolume({ volume: 1 });
-    setIsMuted(false);
-    console.log("🔊 Unmuted for reply:", reply.text);
-    
-    // Send the message - agent will speak it
-    await conversation.sendUserMessage(reply.text);
-    
+
+    // Speak the reply
+    await speakText(reply.text);
+
     // Clear replies
     setSmartReplies([]);
-    
-    // Re-mute after a delay (give time for agent to speak)
-    setTimeout(() => {
-      if (!conversation.isSpeaking) {
-        conversation.setVolume({ volume: 0 });
-        setIsMuted(true);
-        console.log("🔇 Re-muted after reply");
-      }
-    }, 5000);
   };
 
   // Handle custom text input
   const handleCustomInput = async (text: string) => {
-    // Store what we expect
-    pendingReplyRef.current = text;
-    
-    // Unmute
-    conversation.setVolume({ volume: 1 });
-    setIsMuted(false);
-    console.log("🔊 Unmuted for custom input:", text);
-    
-    await conversation.sendUserMessage(text);
+    await speakText(text);
     setSmartReplies([]);
-    
-    // Re-mute after delay
-    setTimeout(() => {
-      if (!conversation.isSpeaking) {
-        conversation.setVolume({ volume: 0 });
-        setIsMuted(true);
-      }
-    }, 5000);
   };
 
   // Handle research completion
   const handleResearchComplete = (results: string) => {
     setIsResearchOpen(false);
     setResearchQuery(null);
-    
-    if (window.__researchResolve) {
-      window.__researchResolve({ results });
-      delete window.__researchResolve;
-    }
+    // TODO: Incorporate research results into context
   };
 
   // End conversation
   const endConversation = async () => {
-    await conversation.endSession();
-    
+    // Stop listening
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    }
+
+    // Save transcript to Convex
     if (transcript.length > 0 && dbUser?._id) {
       await saveTranscript({
         userId: dbUser._id,
         entries: transcript,
       });
     }
-    
+
     setTranscript([]);
     setSmartReplies([]);
-    setIsMuted(true);
   };
 
   return (
@@ -292,19 +295,15 @@ export default function ConversationPage() {
       <header className="bg-background border-b-2 border-border px-4 py-3 flex items-center justify-between sticky top-0 z-10">
         <h1 className="text-xl font-bold text-foreground">FreeSpeech</h1>
         <div className="flex items-center gap-4">
-          {/* Mute indicator */}
-          {conversation.status === "connected" && (
-            <span className={`text-xs font-bold px-2 py-1 rounded ${isMuted ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}`}>
-              {isMuted ? '🔇 Waiting' : '🔊 Speaking'}
-            </span>
-          )}
-          <div className={`w-3 h-3 rounded-full border-2 border-foreground ${
-            conversation.status === "connected" ? "bg-foreground" : "bg-background"
-          }`} />
+          <div
+            className={`w-3 h-3 rounded-full border-2 border-foreground ${
+              isListening ? "bg-foreground animate-pulse" : "bg-background"
+            }`}
+          />
           <span className="text-sm font-medium text-muted-foreground">
-            {conversation.status === "connected" ? "Connected" : "Disconnected"}
+            {isListening ? "Listening..." : "Not listening"}
           </span>
-          {conversation.status === "connected" && (
+          {isListening && (
             <button
               onClick={endConversation}
               className="px-4 py-2 border-2 border-foreground text-foreground rounded-lg text-sm font-bold hover:bg-foreground hover:text-background transition-colors"
@@ -317,29 +316,32 @@ export default function ConversationPage() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col p-4 max-w-4xl mx-auto w-full h-[calc(100vh-64px)]">
-        {conversation.status !== "connected" ? (
+        {!isListening ? (
           // Start Screen
           <div className="flex-1 flex flex-col items-center justify-center">
             <div className="text-center mb-8">
-              <h2 className="text-3xl font-bold mb-2 text-foreground">Ready to Talk</h2>
+              <h2 className="text-3xl font-bold mb-2 text-foreground">
+                Ready to Talk
+              </h2>
               <p className="text-muted-foreground font-medium">
-                Start a conversation and I'll help you communicate
+                Start listening and I'll help you communicate
               </p>
             </div>
-            
+
             <button
-              onClick={startConversation}
+              onClick={toggleListening}
               disabled={!dbUser?.elevenLabsVoiceId}
-              className="px-8 py-4 bg-primary text-primary-foreground rounded-xl text-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+              className="px-8 py-4 bg-primary text-primary-foreground rounded-xl text-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity flex items-center gap-3"
             >
-              {dbUser?.elevenLabsVoiceId 
-                ? "Start Conversation" 
+              <Mic className="w-6 h-6" />
+              {dbUser?.elevenLabsVoiceId
+                ? "Start Listening"
                 : "Complete Voice Setup First"}
             </button>
-            
+
             {!dbUser?.elevenLabsVoiceId && (
-              <a 
-                href="/onboarding/voice-setup" 
+              <a
+                href="/onboarding/voice-setup"
                 className="mt-4 text-primary font-bold hover:underline"
               >
                 Set up your voice →
@@ -350,12 +352,12 @@ export default function ConversationPage() {
           // Active Conversation
           <div className="flex-1 flex flex-col gap-4 overflow-hidden">
             {/* Transcript */}
-            <TranscriptPanel 
+            <TranscriptPanel
               entries={transcript}
-              isSpeaking={conversation.isSpeaking && !isMuted}
+              isSpeaking={isSpeaking}
               className="flex-1 min-h-0"
             />
-            
+
             {/* Research Panel */}
             {isResearchOpen && researchQuery && (
               <ResearchPanel
@@ -365,38 +367,37 @@ export default function ConversationPage() {
                 className="shrink-0 max-h-[40vh]"
               />
             )}
-            
+
             <div className="shrink-0 flex flex-col gap-4">
-                {/* Smart Replies */}
+              {/* Smart Replies */}
+              {isGeneratingReplies ? (
+                <div className="text-center text-muted-foreground py-4">
+                  <p className="text-sm font-medium">Generating replies...</p>
+                </div>
+              ) : (
                 <SmartReplies
-                options={smartReplies}
-                onSelect={handleSelectReply}
-                onRegenerate={() => {
-                    conversation.sendUserMessage("Please give me different reply options");
-                    setSmartReplies([]);
-                }}
-                className=""
+                  options={smartReplies}
+                  onSelect={handleSelectReply}
+                  onRegenerate={() => {
+                    generateSmartReplies(transcript);
+                  }}
+                  className=""
                 />
-                
-                {/* Custom Input */}
-                <CustomInput
+              )}
+
+              {/* Custom Input */}
+              <CustomInput
                 onSubmit={handleCustomInput}
                 onResearchTrigger={() => {
-                    conversation.sendUserMessage("I need to research something");
+                  setResearchQuery("User requested research");
+                  setIsResearchOpen(true);
                 }}
                 placeholder="Type something to say, or tap a quick reply above..."
-                />
+              />
             </div>
           </div>
         )}
       </main>
     </div>
   );
-}
-
-// Type declaration for research resolve
-declare global {
-  interface Window {
-    __researchResolve?: (result: { results: string }) => void;
-  }
 }
