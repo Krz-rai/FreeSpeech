@@ -44,7 +44,7 @@ export function CustomInput({
   }, [text, onSubmit, onResearchTrigger]);
 
   return (
-    <div className="bg-white rounded-xl border shadow-sm">
+    <div className="bg-card rounded-xl border-2 border-border shadow-none">
       <div className="flex items-end gap-2 p-3">
         <textarea
           ref={inputRef}
@@ -52,12 +52,12 @@ export function CustomInput({
           onChange={(e) => setText(e.target.value)}
           placeholder={placeholder}
           rows={2}
-          className="flex-1 resize-none border-0 focus:ring-0 text-lg p-2 outline-none"
+          className="flex-1 resize-none border-0 focus:ring-0 text-lg p-2 outline-none bg-transparent placeholder:text-muted-foreground"
         />
         <div className="flex flex-col gap-2">
           <button
             onClick={onResearchTrigger}
-            className="p-3 rounded-lg border hover:bg-gray-50"
+            className="p-3 rounded-lg border-2 border-border hover:bg-accent transition-colors"
             title="Research (⌘K)"
           >
             <Search className="w-5 h-5" />
@@ -65,13 +65,13 @@ export function CustomInput({
           <button
             onClick={handleSubmit}
             disabled={!text.trim()}
-            className="p-3 rounded-lg bg-blue-600 text-white disabled:opacity-50"
+            className="p-3 rounded-lg bg-primary text-primary-foreground disabled:opacity-50 hover:opacity-90 transition-opacity"
           >
             <Send className="w-5 h-5" />
           </button>
         </div>
       </div>
-      <div className="px-4 pb-2 flex items-center gap-4 text-xs text-gray-400">
+      <div className="px-4 pb-2 flex items-center gap-4 text-xs text-muted-foreground font-medium">
         <span className="flex items-center gap-1">
           <Keyboard className="w-3 h-3" /> Enter to send
         </span>
@@ -80,4 +80,3 @@ export function CustomInput({
     </div>
   );
 }
-

@@ -57,21 +57,21 @@ export function ResearchPanel({
   });
 
   return (
-    <div className={`bg-white rounded-xl border shadow-lg p-4 ${className}`}>
+    <div className={`bg-card rounded-xl border-2 border-border shadow-none p-4 ${className}`}>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Search className="w-5 h-5 text-blue-600" />
-          <span className="font-medium">Research: {query}</span>
+          <Search className="w-5 h-5 text-foreground" />
+          <span className="font-bold">Research: {query}</span>
         </div>
-        <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">
+        <button onClick={onClose} className="p-1 hover:bg-accent rounded transition-colors">
           <X className="w-5 h-5" />
         </button>
       </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-          <span className="ml-2 text-gray-600">Searching...</span>
+          <Loader2 className="w-6 h-6 animate-spin text-foreground" />
+          <span className="ml-2 text-muted-foreground font-medium">Searching...</span>
         </div>
       ) : (
         <>
@@ -79,10 +79,10 @@ export function ResearchPanel({
             {results.map((result, index) => (
               <label
                 key={index}
-                className={`block p-3 rounded-lg border cursor-pointer transition-colors ${
+                className={`block p-3 rounded-lg border-2 cursor-pointer transition-colors ${
                   selectedResults.has(index) 
-                    ? "bg-blue-50 border-blue-300" 
-                    : "bg-gray-50 border-gray-200 hover:bg-gray-100"
+                    ? "bg-primary text-primary-foreground border-primary" 
+                    : "bg-card border-border hover:bg-accent hover:border-foreground"
                 }`}
               >
                 <div className="flex items-start gap-3">
@@ -98,14 +98,14 @@ export function ResearchPanel({
                       }
                       setSelectedResults(newSet);
                     }}
-                    className="mt-1"
+                    className="mt-1 accent-current"
                   />
                   <div className="flex-1">
-                    <div className="font-medium text-sm flex items-center gap-1">
+                    <div className="font-bold text-sm flex items-center gap-1">
                       {result.title}
-                      <ExternalLink className="w-3 h-3 text-gray-400" />
+                      <ExternalLink className={`w-3 h-3 ${selectedResults.has(index) ? 'text-primary-foreground/70' : 'text-muted-foreground'}`} />
                     </div>
-                    <p className="text-xs text-gray-600 mt-1">{result.snippet}</p>
+                    <p className={`text-xs mt-1 font-medium ${selectedResults.has(index) ? 'text-primary-foreground/90' : 'text-muted-foreground'}`}>{result.snippet}</p>
                   </div>
                 </div>
               </label>
@@ -116,13 +116,13 @@ export function ResearchPanel({
             <button
               onClick={handleUseResults}
               disabled={selectedResults.size === 0}
-              className="flex-1 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50"
+              className="flex-1 py-2 bg-primary text-primary-foreground rounded-lg disabled:opacity-50 font-bold hover:opacity-90 transition-opacity"
             >
               Use Selected ({selectedResults.size})
             </button>
             <button
               onClick={() => onComplete("I couldn't find what I was looking for")}
-              className="px-4 py-2 border rounded-lg"
+              className="px-4 py-2 border-2 border-border rounded-lg font-medium hover:bg-accent transition-colors"
             >
               Skip
             </button>
@@ -132,4 +132,3 @@ export function ResearchPanel({
     </div>
   );
 }
-

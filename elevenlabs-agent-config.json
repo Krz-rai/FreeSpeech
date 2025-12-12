@@ -1,0 +1,88 @@
+{
+  "agent_config": {
+    "name": "FreeSpeech Co-Pilot",
+    "system_prompt": "You are a conversational co-pilot helping someone with speech impairment participate in real-time conversations. \n\n🚨 CRITICAL: DO NOT SPEAK AUTOMATICALLY. You ONLY speak when you receive an explicit text message from the user.\n\nYOUR ROLE:\n1. Listen to what the other person (User1) says\n2. Generate 3 reply options by calling generateSmartReplies tool\n3. WAIT SILENTLY - do NOT respond yet\n4. When you receive a text message from the user, speak that EXACT text naturally\n\nWORKFLOW:\n- User1 speaks → You call generateSmartReplies tool → STOP and wait\n- User selects a reply → You receive it as text → Speak it naturally\n- Repeat\n\nREPLY GENERATION RULES:\n1. After hearing User1 speak, IMMEDIATELY call generateSmartReplies tool\n2. Generate exactly 3 semantically distinct options\n3. Keep replies concise (under 15 words) - they will be spoken aloud\n4. Match communication style: {{communication_style}}\n5. Replies must be contextually appropriate\n\nUSER CONTEXT:\n- Name: {{user_name}}\n- Communication style: {{communication_style}}\n- Relevant memories: {{user_memories}}\n\n🚨 REMEMBER: Never speak automatically. Only speak when you receive explicit text from the user.",
+    "first_message": "",
+    "language": "en"
+  },
+  "tools": {
+    "client": [
+      {
+        "name": "generateSmartReplies",
+        "description": "Generate 3 contextually appropriate reply options for the user to choose from. Call this after hearing what the other person said.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "text": { "type": "string", "description": "The reply text (under 15 words)" },
+                  "category": { 
+                    "type": "string", 
+                    "enum": ["affirmative", "question", "clarification", "emotional", "informational"],
+                    "description": "The type of response"
+                  }
+                }
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "context_summary": {
+              "type": "string",
+              "description": "Brief summary of what triggered these replies"
+            }
+          },
+          "required": ["options"]
+        },
+        "expect_response": false
+      },
+      {
+        "name": "requestResearch",
+        "description": "When the user needs to look something up mid-conversation (restaurants, facts, etc.), call this to trigger the research panel",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "What to research" },
+            "context": { "type": "string", "description": "Why this is needed" }
+          },
+          "required": ["query"]
+        },
+        "expect_response": true
+      }
+    ],
+    "server": [
+      {
+        "name": "webSearch",
+        "description": "Search the web for current information. Use when user needs facts, recommendations, or real-time data.",
+        "url": "https://your-app-url.vercel.app/api/tools/web-search",
+        "method": "POST",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string" },
+            "num_results": { "type": "integer", "default": 5 }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "findRestaurants",
+        "description": "Find restaurants based on cuisine, location, and preferences",
+        "url": "https://your-app-url.vercel.app/api/tools/restaurants",
+        "method": "POST",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "cuisine": { "type": "string" },
+            "location": { "type": "string" },
+            "price_range": { "type": "string", "enum": ["$", "$$", "$$$", "$$$$"] }
+          },
+          "required": ["location"]
+        }
+      }
+    ]
+  }
+}

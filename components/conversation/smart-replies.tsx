@@ -15,14 +15,6 @@ interface SmartRepliesProps {
   className?: string;
 }
 
-const categoryColors: Record<string, string> = {
-  affirmative: "bg-green-50 border-green-200 hover:bg-green-100",
-  question: "bg-blue-50 border-blue-200 hover:bg-blue-100",
-  clarification: "bg-yellow-50 border-yellow-200 hover:bg-yellow-100",
-  emotional: "bg-pink-50 border-pink-200 hover:bg-pink-100",
-  informational: "bg-purple-50 border-purple-200 hover:bg-purple-100",
-};
-
 export function SmartReplies({ 
   options, 
   onSelect, 
@@ -31,8 +23,8 @@ export function SmartReplies({
 }: SmartRepliesProps) {
   if (options.length === 0) {
     return (
-      <div className={`text-center text-gray-500 py-4 ${className}`}>
-        <p className="text-sm">Waiting for conversation...</p>
+      <div className={`text-center text-muted-foreground py-4 ${className}`}>
+        <p className="text-sm font-medium">Waiting for conversation...</p>
         <p className="text-xs mt-1">Reply options will appear when someone speaks</p>
       </div>
     );
@@ -41,10 +33,15 @@ export function SmartReplies({
   return (
     <div className={className}>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium text-gray-600">Quick Replies</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-foreground">Quick Replies</span>
+          <span className="text-xs font-medium text-muted-foreground px-2 py-0.5 border border-border rounded-full">
+            Select to respond
+          </span>
+        </div>
         <button
           onClick={onRegenerate}
-          className="p-1.5 rounded hover:bg-gray-100 text-gray-500"
+          className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
           title="Get different options"
         >
           <RefreshCw className="w-4 h-4" />
@@ -56,13 +53,11 @@ export function SmartReplies({
           <button
             key={reply.id}
             onClick={() => onSelect(reply)}
-            className={`w-full p-4 text-left rounded-xl border-2 transition-all ${
-              categoryColors[reply.category] || "bg-gray-50 border-gray-200 hover:bg-gray-100"
-            }`}
+            className="w-full p-4 text-left rounded-xl border-2 border-border bg-card hover:bg-primary hover:text-primary-foreground transition-all group"
           >
             <div className="flex items-start justify-between">
-              <span className="text-lg">{reply.text}</span>
-              <kbd className="ml-2 px-2 py-0.5 text-xs bg-white rounded border">
+              <span className="text-lg font-medium">{reply.text}</span>
+              <kbd className="ml-2 px-2 py-0.5 text-xs bg-primary text-primary-foreground rounded border border-primary group-hover:bg-primary-foreground group-hover:text-primary">
                 {index + 1}
               </kbd>
             </div>
@@ -70,10 +65,9 @@ export function SmartReplies({
         ))}
       </div>
       
-      <p className="text-xs text-gray-400 mt-2 text-center">
+      <p className="text-xs text-muted-foreground mt-2 text-center font-medium">
         Press 1, 2, or 3 to quick-select • Type below for custom response
       </p>
     </div>
   );
 }
-
